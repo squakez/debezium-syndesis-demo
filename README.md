@@ -4,9 +4,39 @@ Follow these instructions to see how the changes to an Order service are propaga
 
 I am using [minishift](https://www.okd.io/minishift/) as local openshift development cluster; [httpie](https://httpie.org/) as http CLI.
 
-* Deploy [Debezium](https://debezium.io/) (version 0.10) on a local cluster: https://debezium.io/documentation/reference/1.0/operations/openshift.html. You will use `debezium-connect` pod to enable your change data capture.
-The database instance is shared for simplicity, but you can use 2 separate instances.
+* Deploy [Debezium](https://debezium.io/) (version 1.0) on a local cluster: https://debezium.io/documentation/reference/1.0/operations/openshift.html. You will use `debezium-connect` pod to enable your change data capture.
+The database instance used there (`mysql`) is shared for simplicity, but you can create and use 2 separate instances.
 * Deploy [Syndesis](https://syndesis.io/) (version 2.0) on a local cluster: https://syndesis.io/quickstart/
+* Create `user` and `order` databases
+```
+oc exec -it $(oc get pods -o custom-columns=NAME:.metadata.name --no-headers -l app=mysql --field-selector status.phase=Running) -- bash -c 'mysql -u root -p$MYSQL_ROOT_PASSWORD -e "CREATE Database user"'
+oc exec -it $(oc get pods -o custom-columns=NAME:.metadata.name --no-headers -l app=mysql --field-selector status.phase=Running) -- bash -c 'mysql -u root -p$MYSQL_ROOT_PASSWORD -e "CREATE Database order"'
+```
+* Create `order` CDC connector
+```
+oc exec -i -c kafka broker-kafka-0 -- curl -X POST \
+    -H "Accept:application/json" \
+    -H "Content-Type:application/json" \
+    http://debezium-connect-api:8083/connectors -d @- <<'EOF'
+
+{
+    "name": "order-connector",
+    "config": {
+        "connector.class": "io.debezium.connector.mysql.MySqlConnector",
+        "tasks.max": "1",
+        "database.hostname": "mysql",
+        "database.port": "3306",
+        "database.user": "debezium",
+        "database.password": "dbz",
+        "database.server.id": "184054",
+        "database.server.name": "dbserver1",
+        "database.whitelist": "order",
+        "database.history.kafka.bootstrap.servers": "broker-kafka-bootstrap:9092",
+        "database.history.kafka.topic": "schema-changes.order"
+    }
+}
+EOF
+```
 * Deploy `user` microservice pod
 ```
 cd user
